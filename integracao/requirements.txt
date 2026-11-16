@@ -1,2 +1,4 @@
 anycubic-cloud-api==0.4.37
 aiohttp>=3.12,<4
+cryptography>=44,<47
+psycopg[binary]>=3.2,<4
