@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: fabrica3d-anycubic
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: PANEL_USER
+        sync: false
+      - key: PANEL_PASSWORD
+        sync: false
+      - key: ANYCUBIC_TOKEN
+        sync: false
