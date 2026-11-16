@@ -1,0 +1,42 @@
+<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Assistente local de sessao Anycubic</title><style>body{font:16px system-ui;background:#f3f6fb;color:#24344d;margin:24px auto;padding:16px;max-width:850px}section{background:white;padding:20px;border:1px solid #dbe3ef;border-radius:12px;margin:16px 0}button{background:#2869d8;color:white;border:0;padding:12px;border-radius:7px;font:inherit;cursor:pointer}button:disabled{opacity:.5}input{font:inherit;max-width:100%;margin:10px 0}input[type=text]{display:block;width:95%;padding:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#eef2f8;padding:15px}p{line-height:1.6}</style><h1>Assistente de sessao Anycubic</h1><a href="contas.html">Voltar a contas e impressoras</a><section><p>O arquivo escolhido sera lido apenas neste navegador. Este leitor procura campos de sessao tambem dentro de objetos e JSON armazenado como texto. Nao descriptografa arquivos, nao le memoria do computador e nao envia o arquivo inteiro.</p><label>Selecione novamente o arquivo .conf do Slicer:<br><input id="file" type="file" accept=".conf,.json"></label><pre id="result" role="status" aria-live="polite">Nenhum arquivo selecionado.</pre><p>O diagnostico exibe somente nomes fixos de campos e classificacoes, nunca seus valores. Nao envie o arquivo em conversas. Um JWT encontrado ainda nao significa sessao aceita pela Anycubic.</p></section><section><h2>Validar e salvar no painel</h2><p>Somente se houver um unico candidato reconhecido, voce podera autorizar o envio dessa sessao ao seu servidor HTTPS. Nenhum valor sera exibido ou salvo no armazenamento do navegador.</p><form id="form" autocomplete="off"><label>Nome da conta<input type="text" id="name" maxlength="80" value="Fabrica" required></label><label><input id="consent" type="checkbox" required> Autorizo validar e guardar a sessao criptografada no servidor do meu painel.</label><p><button id="save" disabled>Validar sessao e salvar conta</button> <button id="clear" type="button">Limpar sessao</button></p></form><p id="status" role="status" aria-live="polite"></p></section><script>
+"use strict";
+function inspectConfig(text){
+  let root;try{root=JSON.parse(text);}catch{throw Error("O arquivo nao e JSON de configuracao reconhecido. Nenhum conteudo foi enviado.");}
+  let visited=0;const found=[],kinds=[];
+  const keys=new Set(["access_token","token","auth_token","XX-Token"]);
+  function walk(value,depth){
+    if(depth>8||++visited>4000)throw Error("Estrutura extensa demais para este leitor. Nenhum conteudo foi enviado.");
+    if(typeof value==="string"&&value.trim().startsWith("{")){
+      let decoded;try{decoded=JSON.parse(value);}catch{return;}walk(decoded,depth+1);return;
+    }
+    if(!value||typeof value!=="object")return;
+    for(const [key,item] of Object.entries(value)){
+      if(keys.has(key)){
+        const candidate=typeof item==="string"?item.trim():null;
+        const jwt=candidate!==null&&/^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(candidate);
+        kinds.push(key+": "+(jwt?"formato JWT encontrado":candidate===null?"tipo nao textual":candidate.length===0?"vazio":"texto em formato nao suportado; criptografia nao confirmada"));
+        if(jwt)found.push(candidate);
+      }
+      if(item&&typeof item==="object"||typeof item==="string"&&item.trim().startsWith("{"))walk(item,depth+1);
+    }
+  }
+  walk(root,0);const unique=[...new Set(found)];
+  return {token:unique.length===1?unique[0]:null,count:unique.length,report:kinds.length?kinds.join("\n"):"Nenhum dos campos de sessao reconhecidos foi localizado."};
+}
+
+const el=id=>document.getElementById(id);let token=null,reading=false;
+function reset(){token=null;el("save").disabled=true;el("consent").checked=false;el("file").value="";}
+el("clear").onclick=()=>{reset();el("result").textContent="Sessao removida deste assistente.";el("status").textContent="";};
+el("file").onchange=async()=>{
+  if(reading)return;reading=true;const file=el("file").files[0];reset();el("file").disabled=true;el("result").textContent="Lendo localmente...";el("status").textContent="";
+  try{if(!file)throw Error("Nenhum arquivo selecionado.");if(file.size>2000000)throw Error("Selecione somente o arquivo de configuracao, ate 2 MB.");const result=inspectConfig(await file.text());token=result.token;el("result").textContent=result.report+"\n\n"+(result.count===1?"Um candidato encontrado. Revise e autorize abaixo para testar.":result.count>1?"Mais de uma sessao encontrada. Nao selecionamos uma automaticamente.":"Sem sessao suportada. Nao e possivel confirmar criptografia apenas com este resultado.");el("save").disabled=token===null;}
+  catch(e){el("result").textContent=e.message;}finally{reading=false;el("file").disabled=false;}
+};
+el("form").onsubmit=async event=>{
+  event.preventDefault();if(!token||reading)return;reading=true;el("save").disabled=true;el("file").disabled=true;el("clear").disabled=true;el("status").textContent="Consultando a Anycubic pelo seu servidor...";
+  const body={action:"add",name:el("name").value,token};token=null;
+  try{const response=await fetch("/api/accounts",{method:"POST",credentials:"same-origin",cache:"no-store",headers:{"Content-Type":"application/json","X-Panel-Action":"1"},body:JSON.stringify(body),signal:AbortSignal.timeout(55000)});const data=await response.json();if(!response.ok)throw Error(data.error||"A consulta foi recusada.");el("status").textContent="Conta validada e salva. Volte a Contas e impressoras e clique em Recarregar contas. A leitura real ainda deve ser conferida com o Slicer.";}
+  catch(e){el("status").textContent=e.name==="TimeoutError"?"Tempo esgotado. Recarregue as contas antes de repetir: a gravacao pode ter terminado no servidor.":e.name==="SyntaxError"?"O servidor nao retornou uma resposta reconhecida.":e.message||"Falha de conexao.";}
+  finally{body.token="";reset();reading=false;el("file").disabled=false;el("clear").disabled=false;}
+};
+</script></html>
